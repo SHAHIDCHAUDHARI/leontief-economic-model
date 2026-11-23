@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 
+from leontief import inverse, matvec, productivity_bounds, solve, system_matrix, validate_inputs
+
 SAMPLE_SECTORS = ["Agriculture", "Manufacturing", "Energy", "Transport", "Services"]
 SAMPLE_DEMAND = [66.0, 48.0, 30.0, 25.0, 40.0]
 SAMPLE_INPUTS = [
@@ -20,13 +22,6 @@ def equation(inputs, demand, row):
     ]
     right_side = " + ".join([*terms, f"{demand[row]:g}"])
     return rf"x_{{{row + 1}}} = {right_side}"
-
-
-def system_matrix(inputs):
-    return [
-        [int(row == column) - coefficient for column, coefficient in enumerate(values)]
-        for row, values in enumerate(inputs)
-    ]
 
 
 st.set_page_config(page_title="Leontief Economic Model", layout="wide")
@@ -122,3 +117,67 @@ with st.expander("Show how the system matrix is built"):
     with after_system:
         st.write("**After · I − A**")
         st.dataframe(pd.DataFrame(system_matrix(inputs), index=sectors, columns=sectors).round(4))
+
+
+def show_production():
+    st.header("Total production")
+    try:
+        validate_inputs(inputs, demand)
+        if len(set(sectors)) != len(sectors):
+            raise ValueError("Give each sector a different name.")
+        lower, upper = productivity_bounds(inputs)
+        st.write(f"**Productivity check:** spectral radius bounds {lower:.6g} to {upper:.6g}.")
+        if lower >= 1:
+            st.error("This input matrix is not productive. The spectral radius is at least 1.")
+            return
+        if upper >= 1:
+            st.warning("The current bounds cannot confirm productivity. Try reducing the input rates.")
+            return
+
+        st.success("Productive: the upper bound is below 1.")
+        coefficients = system_matrix(inputs)
+        steps = []
+        after = solve(coefficients, demand, trace=steps)
+        before = solve(system_matrix(SAMPLE_INPUTS), SAMPLE_DEMAND)
+        via_inverse = matvec(inverse(coefficients), demand)
+    except ValueError as error:
+        st.error(str(error))
+        return
+
+    before_lookup = dict(zip(SAMPLE_SECTORS, before))
+    comparison = pd.DataFrame({
+        "Before": [before_lookup.get(name, 0.0) for name in sectors],
+        "After": after,
+    }, index=pd.Index(sectors, name="Sector"))
+    comparison["Change"] = comparison["After"] - comparison["Before"]
+    st.dataframe(comparison.round(4))
+    st.bar_chart(
+        comparison[["Before", "After"]].reset_index().melt(
+            id_vars="Sector", var_name="Scenario", value_name="Production",
+        ),
+        x="Sector", y="Production", color="Scenario", stack=False,
+    )
+
+    ranking = comparison["Change"].abs().sort_values(ascending=False, kind="stable").index
+    st.write("**Ranked by size of change**")
+    st.dataframe(comparison.loc[ranking, ["Change"]].round(4))
+
+    with st.expander("Show the row operations and verify the answer"):
+        st.write("Start with [I − A | d]. Each step makes one column of the left side match the identity matrix.")
+        step = st.slider("Elimination step", 0, len(steps) - 1)
+        operation, snapshot = steps[step]
+        st.write(operation)
+        columns = [f"x{number + 1}" for number in range(len(sectors))] + ["Right side"]
+        st.dataframe(pd.DataFrame(snapshot, columns=columns).round(6))
+        internal = matvec(inputs, after)
+        check = pd.DataFrame({
+            "Internal demand (Ax)": internal,
+            "Final demand (d)": demand,
+            "Ax + d": [a + b for a, b in zip(internal, demand)],
+            "Elimination (x)": after,
+            "Inverse (x)": via_inverse,
+        }, index=sectors)
+        st.dataframe(check.round(6))
+
+
+show_production()

@@ -14,7 +14,16 @@ python -m venv .venv
 
 The five-sector data is made up for the demo. Rows show who supplies an input. Columns show who uses that input for production.
 
-## Project progress
+## Follow the calculation
 
-- Scenario editor and before/after equation view.
-- Next milestones are the team-written solver and productivity check, SQLite storage, output chart and ranking, tests, report, and Streamlit Community Cloud deployment.
+After a scenario change, compare the two input matrices and the selected balance equation. Under **Total production**, the table and chart compare output by sector. Open **Show the row operations and verify the answer** to step through reduction of [I − A | d] and compare the result with the matrix inverse and Ax + d.
+
+Run the math tests with:
+
+```powershell
+.venv\Scripts\python -m unittest discover -s tests
+```
+
+The solver, inverse and productivity check use Python arithmetic. The tests use NumPy as a reference.
+
+For Streamlit Community Cloud, use the `main` branch and `streamlit_app.py` as the entry point. SQLite storage and the report are pending.
