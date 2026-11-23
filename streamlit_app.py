@@ -26,7 +26,7 @@ def equation(inputs, demand, row):
 
 st.set_page_config(page_title="Leontief Economic Model", layout="wide")
 st.title("Leontief Economic Model")
-st.write("Change one demand or input rate and trace it through the production equations.")
+st.write("See how a change in customer demand affects production across industries.")
 
 scenario = st.sidebar.radio("What do you want to change?", [
     "Final demand", "Input rate", "Add sectors",
@@ -86,47 +86,12 @@ focus = st.sidebar.selectbox(
     format_func=lambda index: f"x{index + 1} · {sectors[index]}",
     key=f"inspect-{scenario}-{row}",
 )
-left, right = st.columns(2)
-for panel, heading, names, values, final_demand in (
-    (left, "Before", SAMPLE_SECTORS, SAMPLE_INPUTS, SAMPLE_DEMAND),
-    (right, "After", sectors, inputs, demand),
-):
-    with panel:
-        st.subheader(heading)
-        st.write("**A** · Rows supply inputs. Columns produce output.")
-        st.dataframe(pd.DataFrame(values, index=names, columns=names).round(4))
-        st.write("**d** · Final demand")
-        st.dataframe(pd.DataFrame({"Demand": final_demand}, index=names))
-        if focus < len(names):
-            st.write(f"**{names[focus]} balance**")
-            st.latex(equation(values, final_demand, focus))
-        else:
-            st.write("This sector is added in the new scenario.")
-
-st.subheader("What changed?")
-st.write(explanation)
-with st.expander("Show how the system matrix is built"):
-    st.latex(r"x = Ax + d \quad\Longrightarrow\quad (I-A)x=d")
-    st.write("I has 1 on the diagonal and 0 everywhere else. Subtract A cell by cell.")
-    before_system, after_system = st.columns(2)
-    with before_system:
-        st.write("**Before · I − A**")
-        st.dataframe(pd.DataFrame(
-            system_matrix(SAMPLE_INPUTS), index=SAMPLE_SECTORS, columns=SAMPLE_SECTORS,
-        ).round(4))
-    with after_system:
-        st.write("**After · I − A**")
-        st.dataframe(pd.DataFrame(system_matrix(inputs), index=sectors, columns=sectors).round(4))
-
-
 def show_production():
-    st.header("Total production")
     try:
         validate_inputs(inputs, demand)
         if len(set(sectors)) != len(sectors):
             raise ValueError("Give each sector a different name.")
         lower, upper = productivity_bounds(inputs)
-        st.write(f"**Productivity check:** spectral radius bounds {lower:.6g} to {upper:.6g}.")
         if lower >= 1:
             st.error("This input matrix is not productive. The spectral radius is at least 1.")
             return
@@ -134,7 +99,6 @@ def show_production():
             st.warning("The current bounds cannot confirm productivity. Try reducing the input rates.")
             return
 
-        st.success("Productive: the upper bound is below 1.")
         coefficients = system_matrix(inputs)
         steps = []
         after = solve(coefficients, demand, trace=steps)
@@ -150,7 +114,24 @@ def show_production():
         "After": after,
     }, index=pd.Index(sectors, name="Sector"))
     comparison["Change"] = comparison["After"] - comparison["Before"]
-    st.dataframe(comparison.round(4))
+    if scenario == "Final demand":
+        name = sectors[row]
+        demand_card, production_card = st.columns(2)
+        demand_card.metric(
+            f"{name} customers need", f"{demand[row]:g} units",
+            f"{demand[row] - SAMPLE_DEMAND[row]:+.2f} units",
+        )
+        production_card.metric(
+            f"{name} needs to produce", f"{after[row]:.2f} units",
+            f"{after[row] - before[row]:+.2f} units",
+        )
+        st.write(
+            "Total production includes what customers buy and what industries use "
+            "to make their own products."
+        )
+
+    st.subheader("Total production by sector")
+    st.dataframe(comparison.round(2))
     st.bar_chart(
         comparison[["Before", "After"]].reset_index().melt(
             id_vars="Sector", var_name="Scenario", value_name="Production",
@@ -161,6 +142,10 @@ def show_production():
     ranking = comparison["Change"].abs().sort_values(ascending=False, kind="stable").index
     st.write("**Ranked by size of change**")
     st.dataframe(comparison.loc[ranking, ["Change"]].round(4))
+
+    with st.expander("Check whether the economy can meet demand"):
+        st.write(f"The spectral radius is between {lower:.6g} and {upper:.6g}.")
+        st.write("The upper bound is below 1, so this input matrix is productive.")
 
     with st.expander("Show the row operations and verify the answer"):
         st.write("Start with [I − A | d]. Each step makes one column of the left side match the identity matrix.")
@@ -180,4 +165,37 @@ def show_production():
         st.dataframe(check.round(6))
 
 
+st.subheader("What changed?")
+st.write(explanation)
 show_production()
+
+with st.expander("See the matrices and equations"):
+    left, right = st.columns(2)
+    for panel, heading, names, values, final_demand in (
+        (left, "Before", SAMPLE_SECTORS, SAMPLE_INPUTS, SAMPLE_DEMAND),
+        (right, "After", sectors, inputs, demand),
+    ):
+        with panel:
+            st.subheader(heading)
+            st.write("**A** · Rows supply inputs. Columns produce output.")
+            st.dataframe(pd.DataFrame(values, index=names, columns=names).round(4))
+            st.write("**d** · Final demand")
+            st.dataframe(pd.DataFrame({"Demand": final_demand}, index=names))
+            if focus < len(names):
+                st.write(f"**{names[focus]} balance**")
+                st.latex(equation(values, final_demand, focus))
+            else:
+                st.write("This sector is added in the new scenario.")
+
+    with st.container():
+        st.latex(r"x = Ax + d \quad\Longrightarrow\quad (I-A)x=d")
+        st.write("I has 1 on the diagonal and 0 everywhere else. Subtract A cell by cell.")
+        before_system, after_system = st.columns(2)
+        with before_system:
+            st.write("**Before · I − A**")
+            st.dataframe(pd.DataFrame(
+                system_matrix(SAMPLE_INPUTS), index=SAMPLE_SECTORS, columns=SAMPLE_SECTORS,
+            ).round(4))
+        with after_system:
+            st.write("**After · I − A**")
+            st.dataframe(pd.DataFrame(system_matrix(inputs), index=sectors, columns=sectors).round(4))
