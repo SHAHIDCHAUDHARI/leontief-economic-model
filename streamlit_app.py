@@ -38,8 +38,15 @@ demand = SAMPLE_DEMAND.copy()
 if scenario == "Final demand":
     sector = st.sidebar.selectbox("Sector", sectors, index=2)
     row = sectors.index(sector)
-    percent = st.sidebar.number_input("Demand change (%)", min_value=-100.0, value=20.0, step=5.0)
-    demand[row] *= 1 + percent / 100
+    base_demand = SAMPLE_DEMAND[row]
+    change = st.sidebar.number_input(
+        "Demand change (units)",
+        min_value=-base_demand,
+        value=0.0,
+        step=1.0,
+        help=f"Base demand is {base_demand:g}. Enter 20 to add 20 units or −5 to subtract 5.",
+    )
+    demand[row] = base_demand + change
     explanation = (
         f"{sector}'s final demand changes from {SAMPLE_DEMAND[row]:g} to {demand[row]:g}. "
         "The input matrix A and the system matrix I − A stay the same."
