@@ -1,17 +1,10 @@
+import sqlite3
+
 import pandas as pd
 import streamlit as st
 
 from leontief import inverse, matvec, productivity_bounds, solve, system_matrix, validate_inputs
-
-SAMPLE_SECTORS = ["Agriculture", "Manufacturing", "Energy", "Transport", "Services"]
-SAMPLE_DEMAND = [66.0, 48.0, 30.0, 25.0, 40.0]
-SAMPLE_INPUTS = [
-    [0.20, 0.10, 0.05, 0.02, 0.03],
-    [0.10, 0.20, 0.10, 0.08, 0.04],
-    [0.10, 0.15, 0.20, 0.12, 0.09],
-    [0.06, 0.08, 0.05, 0.15, 0.04],
-    [0.05, 0.10, 0.06, 0.08, 0.20],
-]
+from scenario_store import BASE_SCENARIO, initialize, list_scenarios, load_scenario, save_scenario
 
 
 def equation(inputs, demand, row):
@@ -28,17 +21,54 @@ st.set_page_config(page_title="Leontief Economic Model", layout="wide")
 st.title("Leontief Economic Model")
 st.write("See how a change in customer demand affects production across industries.")
 
-scenario = st.sidebar.radio("What do you want to change?", [
+try:
+    initialize()
+    sample_sectors, sample_inputs, sample_demand = load_scenario(BASE_SCENARIO)
+    saved_scenarios = list_scenarios()
+except (sqlite3.Error, ValueError):
+    st.error("The scenario database could not be opened. Refresh the app to try again.")
+    st.stop()
+
+saved_panel = st.sidebar.expander("Save or load scenarios")
+saved_panel.caption("Saved scenarios are shared with other users of this app.")
+if saved_scenarios:
+    selected = saved_panel.selectbox(
+        "Saved scenario", options=list(saved_scenarios),
+        format_func=lambda key: f"{saved_scenarios[key]} (#{key})",
+    )
+    if saved_panel.button("Load scenario"):
+        st.session_state["loaded_scenario"] = selected
+
+loaded_id = st.session_state.get("loaded_scenario")
+if loaded_id is not None and saved_panel.button("Back to editor"):
+    st.session_state.pop("loaded_scenario")
+    loaded_id = None
+
+loaded = None
+if loaded_id is not None:
+    try:
+        loaded = load_scenario(loaded_id)
+    except (sqlite3.Error, ValueError):
+        saved_panel.error("Could not load this scenario. Choose another one.")
+        st.session_state.pop("loaded_scenario", None)
+
+sectors = sample_sectors.copy()
+inputs = [row.copy() for row in sample_inputs]
+demand = sample_demand.copy()
+scenario = "Saved scenario" if loaded else st.sidebar.radio("What do you want to change?", [
     "Final demand", "Input rate", "Add sectors",
 ])
-sectors = SAMPLE_SECTORS.copy()
-inputs = [row.copy() for row in SAMPLE_INPUTS]
-demand = SAMPLE_DEMAND.copy()
 
-if scenario == "Final demand":
+if loaded:
+    sectors, inputs, demand = loaded
+    row = next((index for index, value in enumerate(demand)
+                if index >= len(sample_demand) or value != sample_demand[index]), 2)
+    st.write("Loaded from SQLite:", saved_scenarios[loaded_id])
+    explanation = "The tables and chart compare this saved scenario with the original sample."
+elif scenario == "Final demand":
     sector = st.sidebar.selectbox("Sector", sectors, index=2)
     row = sectors.index(sector)
-    base_demand = SAMPLE_DEMAND[row]
+    base_demand = sample_demand[row]
     change = st.sidebar.number_input(
         "Demand change (units)",
         min_value=-base_demand,
@@ -48,14 +78,14 @@ if scenario == "Final demand":
     )
     demand[row] = base_demand + change
     explanation = (
-        f"{sector}'s final demand changes from {SAMPLE_DEMAND[row]:g} to {demand[row]:g}. "
+        f"{sector}'s final demand changes from {sample_demand[row]:g} to {demand[row]:g}. "
         "The input matrix A and the system matrix I − A stay the same."
     )
 elif scenario == "Input rate":
     supplier = st.sidebar.selectbox("Input supplied by", sectors, index=2)
     producer = st.sidebar.selectbox("Used to produce one unit of", sectors, index=1)
     row, column = sectors.index(supplier), sectors.index(producer)
-    before = SAMPLE_INPUTS[row][column]
+    before = sample_inputs[row][column]
     rate = st.sidebar.number_input(
         "Input per unit", min_value=0.0, value=before, step=0.01, format="%.4f",
         key=f"rate-{row}-{column}",
@@ -76,7 +106,7 @@ else:
         for values in inputs:
             values.append(0.0)
         inputs.append([0.0] * number)
-    row = len(SAMPLE_SECTORS)
+    row = len(sample_sectors)
     inputs[0][row] = st.sidebar.number_input(
         f"Agriculture input per unit of {sectors[row]}", min_value=0.0, value=0.10, step=0.01,
     )
@@ -87,6 +117,22 @@ else:
         f"A grows from 5 × 5 to {count} × {count}. Each new sector adds a row, a column, "
         "a demand value and an equation. The first new sector can trade inputs with Agriculture."
     )
+
+if not loaded:
+    with saved_panel.form("save_scenario_form", clear_on_submit=True):
+        name = st.text_input("Scenario name", max_chars=60)
+        if st.form_submit_button("Save scenario"):
+            try:
+                save_scenario(name, sectors, inputs, demand)
+            except ValueError as error:
+                st.error(str(error))
+            except sqlite3.Error:
+                st.error("Could not save the scenario. Please try again.")
+            else:
+                st.session_state["scenario_saved"] = name.strip()
+                st.rerun()
+    if "scenario_saved" in st.session_state:
+        saved_panel.success(f"Saved: {st.session_state.pop('scenario_saved')}")
 
 focus = st.sidebar.selectbox(
     "Equation to inspect", options=range(len(sectors)), index=row,
@@ -109,13 +155,13 @@ def show_production():
         coefficients = system_matrix(inputs)
         steps = []
         after = solve(coefficients, demand, trace=steps)
-        before = solve(system_matrix(SAMPLE_INPUTS), SAMPLE_DEMAND)
+        before = solve(system_matrix(sample_inputs), sample_demand)
         via_inverse = matvec(inverse(coefficients), demand)
     except ValueError as error:
         st.error(str(error))
         return
 
-    before_lookup = dict(zip(SAMPLE_SECTORS, before))
+    before_lookup = dict(zip(sample_sectors, before))
     comparison = pd.DataFrame({
         "Before": [before_lookup.get(name, 0.0) for name in sectors],
         "After": after,
@@ -126,7 +172,7 @@ def show_production():
         demand_card, production_card = st.columns(2)
         demand_card.metric(
             f"{name} customers need", f"{demand[row]:g} units",
-            f"{demand[row] - SAMPLE_DEMAND[row]:+.2f} units",
+            f"{demand[row] - sample_demand[row]:+.2f} units",
         )
         production_card.metric(
             f"{name} needs to produce", f"{after[row]:.2f} units",
@@ -179,7 +225,7 @@ show_production()
 with st.expander("See the matrices and equations"):
     left, right = st.columns(2)
     for panel, heading, names, values, final_demand in (
-        (left, "Before", SAMPLE_SECTORS, SAMPLE_INPUTS, SAMPLE_DEMAND),
+        (left, "Before", sample_sectors, sample_inputs, sample_demand),
         (right, "After", sectors, inputs, demand),
     ):
         with panel:
@@ -201,7 +247,7 @@ with st.expander("See the matrices and equations"):
         with before_system:
             st.write("**Before · I − A**")
             st.dataframe(pd.DataFrame(
-                system_matrix(SAMPLE_INPUTS), index=SAMPLE_SECTORS, columns=SAMPLE_SECTORS,
+                system_matrix(sample_inputs), index=sample_sectors, columns=sample_sectors,
             ).round(4))
         with after_system:
             st.write("**After · I − A**")

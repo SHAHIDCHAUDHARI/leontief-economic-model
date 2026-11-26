@@ -26,4 +26,10 @@ Run the math tests with:
 
 The solver, inverse and productivity check use Python arithmetic. The tests use NumPy as a reference.
 
-For Streamlit Community Cloud, use the `main` branch and `streamlit_app.py` as the entry point. SQLite storage and the report are pending.
+For Streamlit Community Cloud, use the `main` branch and `streamlit_app.py` as the entry point.
+
+## Save a scenario
+
+The app reads the original sectors, demand and input rates from SQLite. Open **Save or load scenarios** in the sidebar, enter a name and click **Save scenario**. Then select it under **Saved scenario** and click **Load scenario** to see the same inputs and results again. Use **Back to editor** to try a new change.
+
+The schema and sample inserts are in `db/`. Python creates `db/leontief.sqlite3` automatically. Scenario names and inputs are visible to anyone using the same app deployment. Streamlit Community Cloud can reset its local storage, so cloud saves may disappear. The sample is recreated from SQL when the app starts.
