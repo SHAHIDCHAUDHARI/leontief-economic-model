@@ -1,8 +1,10 @@
-# Leontief Economic Model
+# Leontief Economic Model 
 
 This is our Linear Algebra project at JG University. The model tracks how much each sector needs to produce when sectors buy inputs from one another and customers place their own demands.
 
 The first demo compares the original sample with an edited scenario. Select Energy and enter 20 in Demand change (units). The app adds 20 units to the base demand of 30, giving a new final demand of 50. Then change the Energy input used by Manufacturing and look at the coefficient in the Energy equation. Adding a sector shows the extra matrix row, column and equation.
+
+Link :- https://leontief-economic-model.streamlit.app/
 
 ## Run locally
 
